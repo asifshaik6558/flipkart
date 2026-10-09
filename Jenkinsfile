@@ -7,103 +7,72 @@ pipeline {
     }
 
     parameters {
-        choice(
-            name: 'ENVIRONMENT',
-            choices: ['dev', 'stage', 'uat', 'prod'],
-            description: 'Select the target environment'
-        )
+        choice(name: 'ENVIRONMENT',
+               choices: ['dev', 'stage', 'uat', 'prod'],
+               description: 'Target environment')
 
-        choice(
-            name: 'CONFIG_TYPE',
-            choices: ['both', 'environment', 'node'],
-            description: 'Select which configuration to update'
-        )
+        choice(name: 'CONFIG_TYPE',
+               choices: ['both', 'environment', 'node'],
+               description: 'Configuration files to update')
 
-        string(
-            name: 'INSTANCE_TYPE',
-            defaultValue: 'm7i-flex.large',
-            description: 'Node instance type'
-        )
+        string(name: 'INSTANCE_TYPE',
+               defaultValue: 'm7i-flex.large',
+               description: 'Node instance type')
 
-        string(
-            name: 'K8S_VERSION',
-            defaultValue: '',
-            description: 'Optional Kubernetes version'
-        )
+        string(name: 'K8S_VERSION',
+               defaultValue: '',
+               description: 'Optional Kubernetes version')
 
-        string(
-            name: 'CPU',
-            defaultValue: '',
-            description: 'Optional CPU resource value'
-        )
+        string(name: 'CPU',
+               defaultValue: '',
+               description: 'Optional CPU value')
 
-        string(
-            name: 'MEMORY',
-            defaultValue: '',
-            description: 'Optional memory resource value'
-        )
+        string(name: 'MEMORY',
+               defaultValue: '',
+               description: 'Optional memory value')
 
-        string(
-            name: 'ENV_APPNAME',
-            defaultValue: 'Flipkart',
-            description: 'Environment application name'
-        )
+        string(name: 'ENV_APPNAME',
+               defaultValue: 'Flipkart',
+               description: 'Application name')
 
-        string(
-            name: 'ENV_VERSION',
-            defaultValue: '1.0.0',
-            description: 'Application version'
-        )
+        string(name: 'ENV_VERSION',
+               defaultValue: '1.0.0',
+               description: 'Application version')
 
-        string(
-            name: 'ENV_REPLICAS',
-            defaultValue: '2',
-            description: 'Application replica count'
-        )
+        string(name: 'ENV_REPLICAS',
+               defaultValue: '2',
+               description: 'Replica count')
 
-        string(
-            name: 'ENV_LOGLEVEL',
-            defaultValue: 'INFO',
-            description: 'Application log level'
-        )
+        string(name: 'ENV_LOGLEVEL',
+               defaultValue: 'INFO',
+               description: 'Application log level')
 
-        string(
-            name: 'NODE_NAME',
-            defaultValue: 'node-01',
-            description: 'Node name'
-        )
+        string(name: 'NODE_NAME',
+               defaultValue: 'node-01',
+               description: 'Node name')
 
-        string(
-            name: 'NODE_TYPE',
-            defaultValue: 'worker',
-            description: 'Node type'
-        )
+        string(name: 'NODE_TYPE',
+               defaultValue: 'worker',
+               description: 'Node type')
 
-        string(
-            name: 'NODE_REGION',
-            defaultValue: 'us-east-1',
-            description: 'Node region'
-        )
+        string(name: 'NODE_REGION',
+               defaultValue: 'us-east-1',
+               description: 'Node region')
 
-        string(
-            name: 'NODE_AZ',
-            defaultValue: 'us-east-1a',
-            description: 'Node availability zone'
-        )
+        string(name: 'NODE_AZ',
+               defaultValue: 'us-east-1a',
+               description: 'Availability zone')
     }
 
     environment {
         GITHUB_REPO = 'asifshaik6558/flipkart'
         BASE_BRANCH = 'main'
-
         NEXUS_REPOSITORY_URL =
             'http://localhost:8081/repository/flipkart-config-releases'
-
         CONFIG_CHANGES = 'false'
     }
 
     stages {
-
         stage('Checkout') {
             steps {
                 checkout([
@@ -117,7 +86,7 @@ pipeline {
 
                 sh '''
                     set -eu
-                    echo "Checked out repository:"
+                    echo "Checked out commit:"
                     git log -1 --oneline
                 '''
             }
@@ -128,32 +97,34 @@ pipeline {
                 script {
                     if (!(params.ENVIRONMENT in
                         ['dev', 'stage', 'uat', 'prod'])) {
-                        error('Invalid ENVIRONMENT parameter.')
+                        error('Invalid environment')
                     }
 
                     if (!(params.CONFIG_TYPE in
                         ['both', 'environment', 'node'])) {
-                        error('Invalid CONFIG_TYPE parameter.')
+                        error('Invalid configuration type')
                     }
 
                     if (params.CONFIG_TYPE in ['both', 'node'] &&
                         !params.INSTANCE_TYPE?.trim()) {
-                        error(
-                            'INSTANCE_TYPE is required for node or both.'
-                        )
+                        error('INSTANCE_TYPE is required')
                     }
 
-                    if (params.ENV_REPLICAS?.trim() &&
-                        !(params.ENV_REPLICAS ==~ /[1-9][0-9]*/)) {
-                        error('ENV_REPLICAS must be a positive integer.')
+                    if (!(params.ENV_REPLICAS ==~ /[1-9][0-9]*/)) {
+                        error('ENV_REPLICAS must be a positive integer')
                     }
                 }
 
-                sh '''
-                    set -eu
-                    python3 - <<'PY'
+                withEnv([
+                    "ENVIRONMENT=${params.ENVIRONMENT}",
+                    "CONFIG_TYPE=${params.CONFIG_TYPE}"
+                ]) {
+                    sh '''
+                        set -eu
+                        python3 - <<'PY'
 import json
 import os
+import os.path
 
 env_name = os.environ["ENVIRONMENT"]
 config_type = os.environ["CONFIG_TYPE"]
@@ -168,23 +139,39 @@ if config_type in ("node", "both"):
 
 for path in files:
     if not os.path.isfile(path):
-        raise SystemExit(f"Required configuration file not found: {path}")
+        raise SystemExit(f"File not found: {path}")
 
     with open(path, encoding="utf-8") as f:
         json.load(f)
 
     print(f"Valid JSON: {path}")
 PY
-                '''
+                    '''
+                }
             }
         }
 
         stage('Update Configuration') {
             steps {
-                sh '''
-                    set -eu
-
-                    python3 - <<'PY'
+                withEnv([
+                    "ENVIRONMENT=${params.ENVIRONMENT}",
+                    "CONFIG_TYPE=${params.CONFIG_TYPE}",
+                    "ENV_APPNAME=${params.ENV_APPNAME}",
+                    "ENV_VERSION=${params.ENV_VERSION}",
+                    "ENV_REPLICAS=${params.ENV_REPLICAS}",
+                    "ENV_LOGLEVEL=${params.ENV_LOGLEVEL}",
+                    "NODE_NAME=${params.NODE_NAME}",
+                    "NODE_TYPE=${params.NODE_TYPE}",
+                    "NODE_REGION=${params.NODE_REGION}",
+                    "NODE_AZ=${params.NODE_AZ}",
+                    "INSTANCE_TYPE=${params.INSTANCE_TYPE}",
+                    "K8S_VERSION=${params.K8S_VERSION}",
+                    "CPU=${params.CPU}",
+                    "MEMORY=${params.MEMORY}"
+                ]) {
+                    sh '''
+                        set -eu
+                        python3 - <<'PY'
 import json
 import os
 
@@ -250,15 +237,21 @@ if config_type in ("node", "both"):
 
     save_json(path, data)
 PY
-                '''
+                    '''
+                }
             }
         }
 
         stage('Verify JSON and Diff') {
             steps {
-                sh '''
-                    set -eu
-                    python3 - <<'PY'
+                withEnv([
+                    "ENVIRONMENT=${params.ENVIRONMENT}",
+                    "CONFIG_TYPE=${params.CONFIG_TYPE}"
+                ]) {
+                    sh '''
+                        set -eu
+
+                        python3 - <<'PY'
 import json
 import os
 
@@ -279,9 +272,10 @@ for path in files:
     print(f"Verified JSON: {path}")
 PY
 
-                    echo "===== Configuration diff ====="
-                    git diff -- environment node || true
-                '''
+                        echo "===== Configuration diff ====="
+                        git diff -- environment node || true
+                    '''
+                }
             }
         }
 
@@ -302,29 +296,21 @@ PY
                         )
                     }
 
-                    def diffStatus = sh(
+                    int diffStatus = sh(
                         script: "git diff --quiet -- ${filesToCheck.join(' ')}",
                         returnStatus: true
                     )
 
                     if (diffStatus == 0) {
                         env.CONFIG_CHANGES = 'false'
-                        currentBuild.description =
-                            'CONFIG_CHANGES=false'
-
+                        currentBuild.description = 'CONFIG_CHANGES=false'
                         echo 'No configuration changes detected.'
-                        echo 'Git stages will be skipped.'
                     } else if (diffStatus == 1) {
                         env.CONFIG_CHANGES = 'true'
-                        currentBuild.description =
-                            'CONFIG_CHANGES=true'
-
+                        currentBuild.description = 'CONFIG_CHANGES=true'
                         echo 'Configuration changes detected.'
-                        echo 'Git stages will run.'
                     } else {
-                        error(
-                            "Git diff failed with exit code ${diffStatus}"
-                        )
+                        error("git diff failed with code ${diffStatus}")
                     }
                 }
             }
@@ -336,16 +322,14 @@ PY
                     def scannerHome = tool 'SonarQube-Scanner'
 
                     withSonarQubeEnv('SonarQube-Server') {
-                        withEnv(["SONAR_SCANNER_HOME=${scannerHome}"]) {
-                            sh '''
-                                set -eu
-                                "$SONAR_SCANNER_HOME/bin/sonar-scanner" \
-                                  -Dsonar.projectKey=flipkart-config-automation \
-                                  -Dsonar.projectName=Flipkart-Config-Automation \
-                                  -Dsonar.sources=environment,node \
-                                  -Dsonar.sourceEncoding=UTF-8
-                            '''
-                        }
+                        sh """
+                            set -eu
+                            '${scannerHome}/bin/sonar-scanner' \
+                              -Dsonar.projectKey=flipkart-config-automation \
+                              -Dsonar.projectName=Flipkart-Config-Automation \
+                              -Dsonar.sources=environment,node \
+                              -Dsonar.sourceEncoding=UTF-8
+                        """
                     }
                 }
             }
@@ -357,7 +341,6 @@ PY
                     fileExists('pom.xml')
                 }
             }
-
             steps {
                 sh 'mvn -B clean verify'
             }
@@ -389,7 +372,6 @@ PY
                     ]) {
                         sh '''
                             set -eu
-
                             python3 - <<'PY'
 import os
 import zipfile
@@ -450,25 +432,36 @@ PY
                     currentBuild.description == 'CONFIG_CHANGES=true'
                 }
             }
-
             steps {
                 script {
                     env.FEATURE_BRANCH =
                         "feature/update-${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
 
-                    withEnv(["FEATURE_BRANCH=${env.FEATURE_BRANCH}"]) {
+                    def filesToStage = []
+
+                    if (params.CONFIG_TYPE in ['environment', 'both']) {
+                        filesToStage.add(
+                            "environment/${params.ENVIRONMENT}.json"
+                        )
+                    }
+
+                    if (params.CONFIG_TYPE in ['node', 'both']) {
+                        filesToStage.add(
+                            "node/${params.ENVIRONMENT}.json"
+                        )
+                    }
+
+                    withEnv([
+                        "FEATURE_BRANCH=${env.FEATURE_BRANCH}",
+                        "FILES_TO_STAGE=${filesToStage.join(' ')}"
+                    ]) {
                         sh '''
                             set -eu
-
                             git config user.name "Asif Shaik"
                             git config user.email "asifshaik6558@gmail.com"
-
                             git switch -c "$FEATURE_BRANCH"
 
-                            git add -- \
-                              "environment/$ENVIRONMENT.json" \
-                              "node/$ENVIRONMENT.json"
-
+                            git add -- $FILES_TO_STAGE
                             git diff --cached --check
 
                             if git diff --cached --quiet; then
@@ -476,7 +469,7 @@ PY
                                 exit 1
                             fi
 
-                            git commit -m "Update $ENVIRONMENT configuration"
+                            git commit -m "Update configuration for $ENVIRONMENT"
                         '''
                     }
                 }
@@ -489,13 +482,7 @@ PY
                     currentBuild.description == 'CONFIG_CHANGES=true'
                 }
             }
-
             steps {
-                script {
-                    env.FEATURE_BRANCH =
-                        "feature/update-${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
-                }
-
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'git',
@@ -507,8 +494,8 @@ PY
                         set -eu
                         set +x
 
-                        AUTH=$(printf '%s:%s' \
-                          "$GIT_USERNAME" "$GIT_TOKEN" | base64 | tr -d '\\n')
+                        AUTH=$(printf '%s:%s' "$GIT_USERNAME" "$GIT_TOKEN" |
+                            base64 | tr -d '\\n')
 
                         git -c http.extraheader="AUTHORIZATION: basic $AUTH" \
                           push "https://github.com/$GITHUB_REPO.git" \
@@ -526,13 +513,7 @@ PY
                     currentBuild.description == 'CONFIG_CHANGES=true'
                 }
             }
-
             steps {
-                script {
-                    env.FEATURE_BRANCH =
-                        "feature/update-${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
-                }
-
                 withCredentials([
                     usernamePassword(
                         credentialsId: 'git',
@@ -540,16 +521,19 @@ PY
                         passwordVariable: 'GIT_TOKEN'
                     )
                 ]) {
-                    sh '''
-                        set -eu
-                        set +x
+                    withEnv([
+                        "PR_ENVIRONMENT=${params.ENVIRONMENT}"
+                    ]) {
+                        sh '''
+                            set -eu
+                            set +x
 
-                        python3 - <<'PY'
+                            python3 - <<'PY'
 import json
 import os
 
 payload = {
-    "title": "Update " + os.environ["ENVIRONMENT"] + " configuration",
+    "title": "Update " + os.environ["PR_ENVIRONMENT"] + " configuration",
     "head": os.environ["FEATURE_BRANCH"],
     "base": os.environ["BASE_BRANCH"],
     "body": (
@@ -564,35 +548,34 @@ with open("pull-request.json", "w", encoding="utf-8") as f:
     json.dump(payload, f)
 PY
 
-                        HTTP_CODE=$(curl --silent --show-error \
-                          --output pr-response.json \
-                          --write-out '%{http_code}' \
-                          --user "$GIT_USERNAME:$GIT_TOKEN" \
-                          --header 'Accept: application/vnd.github+json' \
-                          --header 'X-GitHub-Api-Version: 2022-11-28' \
-                          --header 'Content-Type: application/json' \
-                          --request POST \
-                          --data @pull-request.json \
-                          "https://api.github.com/repos/$GITHUB_REPO/pulls")
+                            HTTP_CODE=$(curl --silent --show-error \
+                              --output pr-response.json \
+                              --write-out '%{http_code}' \
+                              --user "$GIT_USERNAME:$GIT_TOKEN" \
+                              --header 'Accept: application/vnd.github+json' \
+                              --header 'X-GitHub-Api-Version: 2022-11-28' \
+                              --header 'Content-Type: application/json' \
+                              --request POST \
+                              --data @pull-request.json \
+                              "https://api.github.com/repos/$GITHUB_REPO/pulls")
 
-                        if [ "$HTTP_CODE" -lt 200 ] ||
-                           [ "$HTTP_CODE" -ge 300 ]; then
-                            echo "GitHub pull request creation failed."
-                            cat pr-response.json
-                            exit 1
-                        fi
+                            if [ "$HTTP_CODE" -lt 200 ] ||
+                               [ "$HTTP_CODE" -ge 300 ]; then
+                                echo "GitHub pull request creation failed."
+                                cat pr-response.json
+                                exit 1
+                            fi
 
-                        python3 - <<'PY'
+                            python3 - <<'PY'
 import json
 
 with open("pr-response.json", encoding="utf-8") as f:
     result = json.load(f)
 
-print("Pull request created successfully.")
-print("PR number:", result.get("number"))
-print("PR URL:", result.get("html_url"))
+print("Pull request created:", result.get("html_url"))
 PY
-                    '''
+                        '''
+                    }
                 }
             }
         }
