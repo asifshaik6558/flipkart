@@ -43,12 +43,14 @@ pipeline {
         SONAR_SERVER = 'SonarQube-Server'
         SONAR_SCANNER = 'SonarQube-Scanner'
         NEXUS_REPOSITORY_URL = 'http://localhost:8081/repository/flipkart-config-releases'
+        CONFIG_CHANGES = 'false'
     }
 
     stages {
         stage('Checkout GitHub Repository') {
             steps {
                 deleteDir()
+
                 git branch: 'main',
                     credentialsId: 'git',
                     url: 'https://github.com/asifshaik6558/flipkart.git'
@@ -97,16 +99,30 @@ pipeline {
                 script {
                     if (params.CONFIG_TYPE in ['environment', 'both']) {
                         def f = "environment/${params.ENVIRONMENT}.json"
-                        if (!fileExists(f)) error("Missing file: ${f}")
+
+                        if (!fileExists(f)) {
+                            error("Missing file: ${f}")
+                        }
+
                         def c = readJSON(file: f, returnPojo: true)
-                        if (!(c instanceof Map)) error("Invalid JSON object: ${f}")
+
+                        if (!(c instanceof Map)) {
+                            error("Invalid JSON object: ${f}")
+                        }
                     }
 
                     if (params.CONFIG_TYPE in ['node', 'both']) {
                         def f = "node/${params.ENVIRONMENT}.json"
-                        if (!fileExists(f)) error("Missing file: ${f}")
+
+                        if (!fileExists(f)) {
+                            error("Missing file: ${f}")
+                        }
+
                         def c = readJSON(file: f, returnPojo: true)
-                        if (!(c instanceof Map)) error("Invalid JSON object: ${f}")
+
+                        if (!(c instanceof Map)) {
+                            error("Invalid JSON object: ${f}")
+                        }
                     }
                 }
             }
@@ -123,12 +139,21 @@ pipeline {
                             if (params.ENV_VERSION.trim() == c.version?.toString()) {
                                 error('New version must differ from current version')
                             }
+
                             c.version = params.ENV_VERSION.trim()
                         }
 
-                        if (params.ENV_APPNAME?.trim()) c.appName = params.ENV_APPNAME.trim()
-                        if (params.ENV_REPLICAS?.trim()) c.replicas = params.ENV_REPLICAS.trim().toInteger()
-                        if (params.ENV_LOGLEVEL?.trim()) c.logLevel = params.ENV_LOGLEVEL.trim()
+                        if (params.ENV_APPNAME?.trim()) {
+                            c.appName = params.ENV_APPNAME.trim()
+                        }
+
+                        if (params.ENV_REPLICAS?.trim()) {
+                            c.replicas = params.ENV_REPLICAS.trim().toInteger()
+                        }
+
+                        if (params.ENV_LOGLEVEL?.trim()) {
+                            c.logLevel = params.ENV_LOGLEVEL.trim()
+                        }
 
                         writeJSON(file: f, json: c, pretty: 4)
                         echo "Updated ${f}"
@@ -140,20 +165,42 @@ pipeline {
 
                         c.instanceType = params.INSTANCE_TYPE.trim()
 
-                        if (params.NODE_NAME?.trim()) c.nodeName = params.NODE_NAME.trim()
-                        if (params.NODE_TYPE?.trim()) c.nodeType = params.NODE_TYPE.trim()
-                        if (params.NODE_REGION?.trim()) c.region = params.NODE_REGION.trim()
-                        if (params.NODE_AZ?.trim()) c.availabilityZone = params.NODE_AZ.trim()
+                        if (params.NODE_NAME?.trim()) {
+                            c.nodeName = params.NODE_NAME.trim()
+                        }
+
+                        if (params.NODE_TYPE?.trim()) {
+                            c.nodeType = params.NODE_TYPE.trim()
+                        }
+
+                        if (params.NODE_REGION?.trim()) {
+                            c.region = params.NODE_REGION.trim()
+                        }
+
+                        if (params.NODE_AZ?.trim()) {
+                            c.availabilityZone = params.NODE_AZ.trim()
+                        }
 
                         if (params.K8S_VERSION?.trim()) {
-                            if (!(c.kubernetes instanceof Map)) c.kubernetes = [:]
+                            if (!(c.kubernetes instanceof Map)) {
+                                c.kubernetes = [:]
+                            }
+
                             c.kubernetes.version = params.K8S_VERSION.trim()
                         }
 
                         if (params.CPU?.trim() || params.MEMORY?.trim()) {
-                            if (!(c.resources instanceof Map)) c.resources = [:]
-                            if (params.CPU?.trim()) c.resources.cpu = params.CPU.trim()
-                            if (params.MEMORY?.trim()) c.resources.memory = params.MEMORY.trim()
+                            if (!(c.resources instanceof Map)) {
+                                c.resources = [:]
+                            }
+
+                            if (params.CPU?.trim()) {
+                                c.resources.cpu = params.CPU.trim()
+                            }
+
+                            if (params.MEMORY?.trim()) {
+                                c.resources.memory = params.MEMORY.trim()
+                            }
                         }
 
                         writeJSON(file: f, json: c, pretty: 4)
@@ -171,12 +218,14 @@ pipeline {
                     echo "===== Selected configuration diff ====="
                     git diff -- environment node
                 '''
+
                 script {
                     if (params.CONFIG_TYPE in ['environment', 'both']) {
                         def c = readJSON(
                             file: "environment/${params.ENVIRONMENT}.json",
                             returnPojo: true
                         )
+
                         echo "Environment: ${c.environment}, app: ${c.appName}, version: ${c.version}"
                     }
 
@@ -185,7 +234,43 @@ pipeline {
                             file: "node/${params.ENVIRONMENT}.json",
                             returnPojo: true
                         )
+
                         echo "Node: ${c.nodeName}, instance type: ${c.instanceType}"
+                    }
+                }
+            }
+        }
+
+        stage('Check Configuration Changes') {
+            steps {
+                script {
+                    def filesToCheck = []
+
+                    if (params.CONFIG_TYPE in ['environment', 'both']) {
+                        filesToCheck.add(
+                            "environment/${params.ENVIRONMENT}.json"
+                        )
+                    }
+
+                    if (params.CONFIG_TYPE in ['node', 'both']) {
+                        filesToCheck.add(
+                            "node/${params.ENVIRONMENT}.json"
+                        )
+                    }
+
+                    def diffStatus = sh(
+                        script: "git diff --quiet -- ${filesToCheck.join(' ')}",
+                        returnStatus: true
+                    )
+
+                    if (diffStatus == 0) {
+                        env.CONFIG_CHANGES = 'false'
+                        echo 'No configuration changes detected. Git stages will be skipped.'
+                    } else if (diffStatus == 1) {
+                        env.CONFIG_CHANGES = 'true'
+                        echo 'Configuration changes detected. Git stages will run.'
+                    } else {
+                        error('Unable to check configuration changes.')
                     }
                 }
             }
@@ -288,6 +373,9 @@ PY
         }
 
         stage('Create Git Feature Branch') {
+            when {
+                expression { env.CONFIG_CHANGES == 'true' }
+            }
             steps {
                 script {
                     env.FEATURE_BRANCH = "feature/update-${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
@@ -307,8 +395,9 @@ PY
                         fi
 
                         git diff --cached --check
+
                         if git diff --cached --quiet; then
-                            echo "No configuration changes to commit"
+                            echo "Expected configuration changes were not staged."
                             exit 1
                         fi
 
@@ -320,6 +409,9 @@ PY
         }
 
         stage('Push Feature Branch') {
+            when {
+                expression { env.CONFIG_CHANGES == 'true' }
+            }
             steps {
                 withCredentials([
                     gitUsernamePassword(credentialsId: 'git', gitToolName: 'Default')
@@ -333,6 +425,9 @@ PY
         }
 
         stage('Create GitHub Pull Request') {
+            when {
+                expression { env.CONFIG_CHANGES == 'true' }
+            }
             steps {
                 withCredentials([
                     usernamePassword(
@@ -408,9 +503,11 @@ PY
         success {
             echo 'Configuration pipeline completed successfully.'
         }
+
         failure {
             echo 'Pipeline failed. Check Console Output for the failed stage.'
         }
+
         always {
             echo "Final build result: ${currentBuild.currentResult}"
         }
