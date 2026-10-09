@@ -8,166 +8,83 @@ pipeline {
     }
 
     parameters {
-        choice(
-            name: 'ENVIRONMENT',
-            choices: ['dev', 'stage', 'uat', 'prod'],
-            description: 'Environment to update'
-        )
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'stage', 'uat', 'prod'],
+               description: 'Environment to update')
 
-        choice(
-            name: 'CONFIG_TYPE',
-            choices: ['both', 'environment', 'node'],
-            description: 'Which configuration to update'
-        )
+        choice(name: 'CONFIG_TYPE', choices: ['both', 'environment', 'node'],
+               description: 'Configuration to update')
 
-        string(
-            name: 'INSTANCE_TYPE',
-            defaultValue: '',
-            description: 'Required for node updates'
-        )
+        string(name: 'INSTANCE_TYPE', defaultValue: '',
+               description: 'Required for node or both updates')
+        string(name: 'K8S_VERSION', defaultValue: '',
+               description: 'Optional Kubernetes version')
+        string(name: 'CPU', defaultValue: '', description: 'Optional CPU')
+        string(name: 'MEMORY', defaultValue: '', description: 'Optional memory')
 
-        string(
-            name: 'K8S_VERSION',
-            defaultValue: '',
-            description: 'Optional Kubernetes version'
-        )
+        string(name: 'ENV_APPNAME', defaultValue: '',
+               description: 'Optional application name')
+        string(name: 'ENV_VERSION', defaultValue: '',
+               description: 'Optional new application version')
+        string(name: 'ENV_REPLICAS', defaultValue: '',
+               description: 'Optional positive replica count')
+        string(name: 'ENV_LOGLEVEL', defaultValue: '',
+               description: 'DEBUG, INFO, WARN, or ERROR')
 
-        string(
-            name: 'CPU',
-            defaultValue: '',
-            description: 'Optional CPU value'
-        )
-
-        string(
-            name: 'MEMORY',
-            defaultValue: '',
-            description: 'Optional memory value'
-        )
-
-        string(
-            name: 'ENV_APPNAME',
-            defaultValue: '',
-            description: 'Optional application name'
-        )
-
-        string(
-            name: 'ENV_VERSION',
-            defaultValue: '',
-            description: 'Optional new application version'
-        )
-
-        string(
-            name: 'ENV_REPLICAS',
-            defaultValue: '',
-            description: 'Optional replica count'
-        )
-
-        string(
-            name: 'ENV_LOGLEVEL',
-            defaultValue: '',
-            description: 'Optional log level: DEBUG, INFO, WARN, ERROR'
-        )
-
-        string(
-            name: 'NODE_NAME',
-            defaultValue: '',
-            description: 'Optional node name'
-        )
-
-        string(
-            name: 'NODE_TYPE',
-            defaultValue: '',
-            description: 'Optional node type'
-        )
-
-        string(
-            name: 'NODE_REGION',
-            defaultValue: '',
-            description: 'Optional AWS region'
-        )
-
-        string(
-            name: 'NODE_AZ',
-            defaultValue: '',
-            description: 'Optional availability zone'
-        )
+        string(name: 'NODE_NAME', defaultValue: '', description: 'Optional node name')
+        string(name: 'NODE_TYPE', defaultValue: '', description: 'Optional node type')
+        string(name: 'NODE_REGION', defaultValue: '', description: 'Optional AWS region')
+        string(name: 'NODE_AZ', defaultValue: '', description: 'Optional availability zone')
     }
 
     environment {
         GIT_REPO = 'https://github.com/asifshaik6558/flipkart.git'
         GITHUB_REPO = 'asifshaik6558/flipkart'
         BASE_BRANCH = 'main'
-        GIT_CREDENTIALS_ID = 'git'
         SONAR_SERVER = 'SonarQube-Server'
         SONAR_SCANNER = 'SonarQube-Scanner'
+        NEXUS_REPOSITORY_URL = 'http://localhost:8081/repository/flipkart-config-releases'
     }
 
     stages {
         stage('Checkout GitHub Repository') {
             steps {
                 deleteDir()
-
                 git branch: 'main',
                     credentialsId: 'git',
                     url: 'https://github.com/asifshaik6558/flipkart.git'
 
                 sh '''
                     set -eu
-                    echo "===== Current commit ====="
                     git log -1 --oneline
-                    echo "===== Repository files ====="
-                    find environment node -maxdepth 1 \
-                        -type f -name '*.json' | sort
+                    find environment node -maxdepth 1 -type f -name '*.json' | sort
                 '''
-            }
-        }
-
-        stage('Display Parameters') {
-            steps {
-                echo "Environment: ${params.ENVIRONMENT}"
-                echo "Configuration type: ${params.CONFIG_TYPE}"
-                echo "Instance type: ${params.INSTANCE_TYPE}"
-                echo "Kubernetes version: ${params.K8S_VERSION}"
-                echo "CPU: ${params.CPU}"
-                echo "Memory: ${params.MEMORY}"
             }
         }
 
         stage('Validate Parameters') {
             steps {
                 script {
-                    if (!(params.ENVIRONMENT in
-                        ['dev', 'stage', 'uat', 'prod'])) {
-                        error('Invalid environment selected')
+                    if (!(params.ENVIRONMENT in ['dev', 'stage', 'uat', 'prod'])) {
+                        error('Invalid environment')
                     }
 
-                    if (!(params.CONFIG_TYPE in
-                        ['both', 'environment', 'node'])) {
+                    if (!(params.CONFIG_TYPE in ['both', 'environment', 'node'])) {
                         error('Invalid configuration type')
                     }
 
-                    if (params.CONFIG_TYPE in ['node', 'both']) {
-                        if (!params.INSTANCE_TYPE?.trim()) {
-                            error(
-                                'INSTANCE_TYPE is required for node updates'
-                            )
-                        }
+                    if (params.CONFIG_TYPE in ['node', 'both'] &&
+                        !params.INSTANCE_TYPE?.trim()) {
+                        error('INSTANCE_TYPE is required for node updates')
                     }
 
-                    if (params.ENV_REPLICAS?.trim()) {
-                        if (!(params.ENV_REPLICAS.trim() ==~
-                            /[1-9][0-9]*/)) {
-                            error(
-                                'ENV_REPLICAS must be a positive integer'
-                            )
-                        }
+                    if (params.ENV_REPLICAS?.trim() &&
+                        !(params.ENV_REPLICAS.trim() ==~ /[1-9][0-9]*/)) {
+                        error('ENV_REPLICAS must be a positive integer')
                     }
 
-                    if (params.ENV_LOGLEVEL?.trim()) {
-                        if (!(params.ENV_LOGLEVEL.trim() in
-                            ['DEBUG', 'INFO', 'WARN', 'ERROR'])) {
-                            error('Invalid ENV_LOGLEVEL')
-                        }
+                    if (params.ENV_LOGLEVEL?.trim() &&
+                        !(params.ENV_LOGLEVEL.trim() in ['DEBUG', 'INFO', 'WARN', 'ERROR'])) {
+                        error('Invalid ENV_LOGLEVEL')
                     }
 
                     echo 'Parameter validation passed'
@@ -175,48 +92,21 @@ pipeline {
             }
         }
 
-        stage('Read Configuration Files') {
+        stage('Read and Validate JSON') {
             steps {
                 script {
-                    if (params.CONFIG_TYPE in
-                        ['environment', 'both']) {
-                        def envFile =
-                            "environment/${params.ENVIRONMENT}.json"
-
-                        if (!fileExists(envFile)) {
-                            error("Missing file: ${envFile}")
-                        }
-
-                        def envConfig = readJSON(
-                            file: envFile,
-                            returnPojo: true
-                        )
-
-                        if (!(envConfig instanceof Map)) {
-                            error("Invalid JSON object: ${envFile}")
-                        }
-
-                        echo "Validated JSON file: ${envFile}"
+                    if (params.CONFIG_TYPE in ['environment', 'both']) {
+                        def f = "environment/${params.ENVIRONMENT}.json"
+                        if (!fileExists(f)) error("Missing file: ${f}")
+                        def c = readJSON(file: f, returnPojo: true)
+                        if (!(c instanceof Map)) error("Invalid JSON object: ${f}")
                     }
 
                     if (params.CONFIG_TYPE in ['node', 'both']) {
-                        def nodeFile =
-                            "node/${params.ENVIRONMENT}.json"
-
-                        if (!fileExists(nodeFile)) {
-                            error("Missing file: ${nodeFile}")
-                        }
-
-                        def nodeConfig = readJSON(
-                            file: nodeFile,
-                            returnPojo: true
-                        )
-
-                        if (!(nodeConfig instanceof Map)) {
-                            error("Invalid JSON object: ${nodeFile}")
-                        }
-
-                        echo "Validated JSON file: ${nodeFile}"
+                        def f = "node/${params.ENVIRONMENT}.json"
+                        if (!fileExists(f)) error("Missing file: ${f}")
+                        def c = readJSON(file: f, returnPojo: true)
+                        if (!(c instanceof Map)) error("Invalid JSON object: ${f}")
                     }
                 }
             }
@@ -225,159 +115,78 @@ pipeline {
         stage('Update JSON Configuration') {
             steps {
                 script {
-                    if (params.CONFIG_TYPE in
-                        ['environment', 'both']) {
-                        def envFile =
-                            "environment/${params.ENVIRONMENT}.json"
-
-                        def config = readJSON(
-                            file: envFile,
-                            returnPojo: true
-                        )
+                    if (params.CONFIG_TYPE in ['environment', 'both']) {
+                        def f = "environment/${params.ENVIRONMENT}.json"
+                        def c = readJSON(file: f, returnPojo: true)
 
                         if (params.ENV_VERSION?.trim()) {
-                            if (params.ENV_VERSION.trim() ==
-                                config.version?.toString()) {
-                                error(
-                                    'New version must differ from current version'
-                                )
+                            if (params.ENV_VERSION.trim() == c.version?.toString()) {
+                                error('New version must differ from current version')
                             }
-
-                            config.version = params.ENV_VERSION.trim()
+                            c.version = params.ENV_VERSION.trim()
                         }
 
-                        if (params.ENV_APPNAME?.trim()) {
-                            config.appName = params.ENV_APPNAME.trim()
-                        }
+                        if (params.ENV_APPNAME?.trim()) c.appName = params.ENV_APPNAME.trim()
+                        if (params.ENV_REPLICAS?.trim()) c.replicas = params.ENV_REPLICAS.trim().toInteger()
+                        if (params.ENV_LOGLEVEL?.trim()) c.logLevel = params.ENV_LOGLEVEL.trim()
 
-                        if (params.ENV_REPLICAS?.trim()) {
-                            config.replicas =
-                                params.ENV_REPLICAS.trim().toInteger()
-                        }
-
-                        if (params.ENV_LOGLEVEL?.trim()) {
-                            config.logLevel =
-                                params.ENV_LOGLEVEL.trim()
-                        }
-
-                        writeJSON(
-                            file: envFile,
-                            json: config,
-                            pretty: 4
-                        )
-
-                        echo "Updated local configuration: ${envFile}"
+                        writeJSON(file: f, json: c, pretty: 4)
+                        echo "Updated ${f}"
                     }
 
                     if (params.CONFIG_TYPE in ['node', 'both']) {
-                        def nodeFile =
-                            "node/${params.ENVIRONMENT}.json"
+                        def f = "node/${params.ENVIRONMENT}.json"
+                        def c = readJSON(file: f, returnPojo: true)
 
-                        def config = readJSON(
-                            file: nodeFile,
-                            returnPojo: true
-                        )
+                        c.instanceType = params.INSTANCE_TYPE.trim()
 
-                        config.instanceType =
-                            params.INSTANCE_TYPE.trim()
-
-                        if (params.NODE_NAME?.trim()) {
-                            config.nodeName = params.NODE_NAME.trim()
-                        }
-
-                        if (params.NODE_TYPE?.trim()) {
-                            config.nodeType = params.NODE_TYPE.trim()
-                        }
-
-                        if (params.NODE_REGION?.trim()) {
-                            config.region = params.NODE_REGION.trim()
-                        }
-
-                        if (params.NODE_AZ?.trim()) {
-                            config.availabilityZone =
-                                params.NODE_AZ.trim()
-                        }
+                        if (params.NODE_NAME?.trim()) c.nodeName = params.NODE_NAME.trim()
+                        if (params.NODE_TYPE?.trim()) c.nodeType = params.NODE_TYPE.trim()
+                        if (params.NODE_REGION?.trim()) c.region = params.NODE_REGION.trim()
+                        if (params.NODE_AZ?.trim()) c.availabilityZone = params.NODE_AZ.trim()
 
                         if (params.K8S_VERSION?.trim()) {
-                            if (!(config.kubernetes instanceof Map)) {
-                                config.kubernetes = [:]
-                            }
-
-                            config.kubernetes.version =
-                                params.K8S_VERSION.trim()
+                            if (!(c.kubernetes instanceof Map)) c.kubernetes = [:]
+                            c.kubernetes.version = params.K8S_VERSION.trim()
                         }
 
-                        if (params.CPU?.trim() ||
-                            params.MEMORY?.trim()) {
-                            if (!(config.resources instanceof Map)) {
-                                config.resources = [:]
-                            }
-
-                            if (params.CPU?.trim()) {
-                                config.resources.cpu =
-                                    params.CPU.trim()
-                            }
-
-                            if (params.MEMORY?.trim()) {
-                                config.resources.memory =
-                                    params.MEMORY.trim()
-                            }
+                        if (params.CPU?.trim() || params.MEMORY?.trim()) {
+                            if (!(c.resources instanceof Map)) c.resources = [:]
+                            if (params.CPU?.trim()) c.resources.cpu = params.CPU.trim()
+                            if (params.MEMORY?.trim()) c.resources.memory = params.MEMORY.trim()
                         }
 
-                        writeJSON(
-                            file: nodeFile,
-                            json: config,
-                            pretty: 4
-                        )
-
-                        echo "Updated local configuration: ${nodeFile}"
+                        writeJSON(file: f, json: c, pretty: 4)
+                        echo "Updated ${f}"
                     }
                 }
             }
         }
 
-        stage('Verify Updated JSON') {
+        stage('Verify JSON and Diff') {
             steps {
+                sh '''
+                    set -eu
+                    git diff --check
+                    echo "===== Selected configuration diff ====="
+                    git diff -- environment node
+                '''
                 script {
-                    sh 'git diff --check'
-
-                    if (params.CONFIG_TYPE in
-                        ['environment', 'both']) {
-                        def envFile =
-                            "environment/${params.ENVIRONMENT}.json"
-
-                        def config = readJSON(
-                            file: envFile,
+                    if (params.CONFIG_TYPE in ['environment', 'both']) {
+                        def c = readJSON(
+                            file: "environment/${params.ENVIRONMENT}.json",
                             returnPojo: true
                         )
-
-                        echo "Verified environment file: ${envFile}"
-                        echo "Application: ${config.appName}"
-                        echo "Version: ${config.version}"
-                        echo "Replicas: ${config.replicas}"
+                        echo "Environment: ${c.environment}, app: ${c.appName}, version: ${c.version}"
                     }
 
                     if (params.CONFIG_TYPE in ['node', 'both']) {
-                        def nodeFile =
-                            "node/${params.ENVIRONMENT}.json"
-
-                        def config = readJSON(
-                            file: nodeFile,
+                        def c = readJSON(
+                            file: "node/${params.ENVIRONMENT}.json",
                             returnPojo: true
                         )
-
-                        echo "Verified node file: ${nodeFile}"
-                        echo "Instance type: ${config.instanceType}"
-                        echo "Node name: ${config.nodeName}"
-                        echo "Kubernetes: ${config.kubernetes?.version}"
-                        echo "CPU: ${config.resources?.cpu}"
-                        echo "Memory: ${config.resources?.memory}"
+                        echo "Node: ${c.nodeName}, instance type: ${c.instanceType}"
                     }
-
-                    sh '''
-                        echo "===== Selected configuration diff ====="
-                        git diff -- environment node
-                    '''
                 }
             }
         }
@@ -394,7 +203,6 @@ pipeline {
                         withEnv(["PATH+SONAR=${scannerHome}/bin"]) {
                             sh '''
                                 set -eu
-
                                 sonar-scanner \
                                   -Dsonar.projectKey=flipkart-config-automation \
                                   -Dsonar.projectName=Flipkart-Config-Automation \
@@ -409,9 +217,7 @@ pipeline {
 
         stage('Maven Compilation') {
             when {
-                expression {
-                    fileExists('pom.xml')
-                }
+                expression { fileExists('pom.xml') }
             }
             steps {
                 sh 'mvn -B clean verify'
@@ -421,29 +227,21 @@ pipeline {
         stage('Create ZIP Artifact') {
             steps {
                 script {
-                    def filesToPackage = []
+                    def files = []
 
-                    if (params.CONFIG_TYPE in
-                        ['environment', 'both']) {
-                        filesToPackage.add(
-                            "environment/${params.ENVIRONMENT}.json"
-                        )
+                    if (params.CONFIG_TYPE in ['environment', 'both']) {
+                        files.add("environment/${params.ENVIRONMENT}.json")
                     }
 
                     if (params.CONFIG_TYPE in ['node', 'both']) {
-                        filesToPackage.add(
-                            "node/${params.ENVIRONMENT}.json"
-                        )
+                        files.add("node/${params.ENVIRONMENT}.json")
                     }
 
-                    env.ARTIFACT_NAME =
-                        "flipkart-config-${env.BUILD_NUMBER}.zip"
-
-                    env.PACKAGE_FILES = filesToPackage.join(',')
+                    env.ARTIFACT_NAME = "flipkart-config-${params.ENVIRONMENT}-${env.BUILD_NUMBER}.zip"
+                    env.PACKAGE_FILES = files.join(',')
 
                     sh '''
                         set -eu
-
                         python3 - <<'PY'
 import os
 import zipfile
@@ -451,26 +249,40 @@ import zipfile
 artifact = os.environ["ARTIFACT_NAME"]
 files = os.environ["PACKAGE_FILES"].split(",")
 
-with zipfile.ZipFile(
-    artifact, "w", compression=zipfile.ZIP_DEFLATED
-) as archive:
+with zipfile.ZipFile(artifact, "w", zipfile.ZIP_DEFLATED) as z:
     for path in files:
         if not os.path.isfile(path):
             raise FileNotFoundError(path)
-        archive.write(path)
+        z.write(path)
 
-print("Created artifact:", artifact)
-print("Included files:")
-with zipfile.ZipFile(artifact) as archive:
-    for name in archive.namelist():
-        print(" -", name)
+print("Created:", artifact)
+print("Contents:", files)
 PY
                     '''
 
-                    archiveArtifacts(
-                        artifacts: env.ARTIFACT_NAME,
-                        fingerprint: true
+                    archiveArtifacts artifacts: env.ARTIFACT_NAME, fingerprint: true
+                }
+            }
+        }
+
+        stage('Upload Artifact to Nexus') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'nexus-credentials',
+                        usernameVariable: 'NEXUS_USER',
+                        passwordVariable: 'NEXUS_PASSWORD'
                     )
+                ]) {
+                    sh '''
+                        set -eu
+                        set +x
+                        curl --fail --show-error --silent \
+                          --user "$NEXUS_USER:$NEXUS_PASSWORD" \
+                          --upload-file "$ARTIFACT_NAME" \
+                          "$NEXUS_REPOSITORY_URL/$ARTIFACT_NAME"
+                        echo "Artifact uploaded to Nexus"
+                    '''
                 }
             }
         }
@@ -478,42 +290,31 @@ PY
         stage('Create Git Feature Branch') {
             steps {
                 script {
-                    env.FEATURE_BRANCH =
-                        "feature/update-${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
+                    env.FEATURE_BRANCH = "feature/update-${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
 
                     sh '''
                         set -eu
-
                         git config user.name "Asif Shaik"
                         git config user.email "asifshaik6558@gmail.com"
-
                         git switch -c "$FEATURE_BRANCH"
 
                         if [ "$CONFIG_TYPE" = "environment" ]; then
-                            git add -- \
-                                "environment/$ENVIRONMENT.json"
+                            git add -- "environment/$ENVIRONMENT.json"
                         elif [ "$CONFIG_TYPE" = "node" ]; then
-                            git add -- \
-                                "node/$ENVIRONMENT.json"
+                            git add -- "node/$ENVIRONMENT.json"
                         else
-                            git add -- \
-                                "environment/$ENVIRONMENT.json" \
-                                "node/$ENVIRONMENT.json"
-                        fi
-
-                        if git diff --cached --quiet; then
-                            echo "No configuration changes to commit."
-                            exit 1
+                            git add -- "environment/$ENVIRONMENT.json" "node/$ENVIRONMENT.json"
                         fi
 
                         git diff --cached --check
+                        if git diff --cached --quiet; then
+                            echo "No configuration changes to commit"
+                            exit 1
+                        fi
+
                         git diff --cached --stat
-
-                        git commit \
-                            -m "Update $ENVIRONMENT configuration"
+                        git commit -m "Update $ENVIRONMENT configuration"
                     '''
-
-                    echo "Prepared branch: ${env.FEATURE_BRANCH}"
                 }
             }
         }
@@ -521,10 +322,7 @@ PY
         stage('Push Feature Branch') {
             steps {
                 withCredentials([
-                    gitUsernamePassword(
-                        credentialsId: 'git',
-                        gitToolName: 'Default'
-                    )
+                    gitUsernamePassword(credentialsId: 'git', gitToolName: 'Default')
                 ]) {
                     sh '''
                         set -eu
@@ -544,6 +342,7 @@ PY
                     )
                 ]) {
                     sh '''
+                        set -eu
                         set +x
 
                         python3 - <<'PY'
@@ -591,10 +390,7 @@ else:
     request = urllib.request.Request(
         f"https://api.github.com/repos/{repo}/pulls",
         data=json.dumps(payload).encode("utf-8"),
-        headers={
-            **headers,
-            "Content-Type": "application/json"
-        },
+        headers={**headers, "Content-Type": "application/json"},
         method="POST"
     )
 
@@ -612,11 +408,9 @@ PY
         success {
             echo 'Configuration pipeline completed successfully.'
         }
-
         failure {
-            echo 'Pipeline failed. Check the failed stage in Console Output.'
+            echo 'Pipeline failed. Check Console Output for the failed stage.'
         }
-
         always {
             echo "Final build result: ${currentBuild.currentResult}"
         }
