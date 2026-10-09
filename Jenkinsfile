@@ -4,48 +4,93 @@ pipeline {
     options {
         skipDefaultCheckout(true)
         timestamps()
+        disableConcurrentBuilds()
     }
 
     parameters {
-        choice(name: 'ENVIRONMENT',
+        choice(
+            name: 'ENVIRONMENT',
             choices: ['dev', 'stage', 'uat', 'prod'],
-            description: 'Environment configuration to update')
+            description: 'Environment to update'
+        )
 
-        choice(name: 'NODE',
-            choices: ['dev', 'stage', 'uat', 'prod'],
-            description: 'Node configuration to update')
-
-        choice(name: 'CONFIG_TYPE',
+        choice(
+            name: 'CONFIG_TYPE',
             choices: ['both', 'environment', 'node'],
-            description: 'Select configuration type')
+            description: 'Which configuration to update'
+        )
 
-        string(name: 'ENV_APPNAME', defaultValue: '',
-            description: 'Application name (optional)')
-        string(name: 'ENV_VERSION', defaultValue: '',
-            description: 'New application version; required for environment updates')
-        string(name: 'ENV_REPLICAS', defaultValue: '',
-            description: 'Desired replica count (optional)')
-        choice(name: 'ENV_LOGLEVEL',
-            choices: ['', 'DEBUG', 'INFO', 'WARN', 'ERROR'],
-            description: 'Application log level')
+        string(
+            name: 'INSTANCE_TYPE',
+            defaultValue: '',
+            description: 'Required for node updates'
+        )
 
-        string(name: 'NODE_NAME', defaultValue: '',
-            description: 'Node name (optional)')
-        string(name: 'NODE_TYPE', defaultValue: '',
-            description: 'Node type, e.g. worker (optional)')
-        string(name: 'NODE_REGION', defaultValue: '',
-            description: 'AWS region (optional)')
-        string(name: 'NODE_AZ', defaultValue: '',
-            description: 'Availability zone (optional)')
+        string(
+            name: 'K8S_VERSION',
+            defaultValue: '',
+            description: 'Optional Kubernetes version'
+        )
 
-        string(name: 'INSTANCE_TYPE', defaultValue: '',
-            description: 'Required for node updates')
-        string(name: 'K8S_VERSION', defaultValue: '',
-            description: 'Optional Kubernetes version')
-        string(name: 'CPU', defaultValue: '',
-            description: 'Optional CPU value')
-        string(name: 'MEMORY', defaultValue: '',
-            description: 'Optional memory value')
+        string(
+            name: 'CPU',
+            defaultValue: '',
+            description: 'Optional CPU value'
+        )
+
+        string(
+            name: 'MEMORY',
+            defaultValue: '',
+            description: 'Optional memory value'
+        )
+
+        string(
+            name: 'ENV_APPNAME',
+            defaultValue: '',
+            description: 'Optional application name'
+        )
+
+        string(
+            name: 'ENV_VERSION',
+            defaultValue: '',
+            description: 'Optional new application version'
+        )
+
+        string(
+            name: 'ENV_REPLICAS',
+            defaultValue: '',
+            description: 'Optional replica count'
+        )
+
+        string(
+            name: 'ENV_LOGLEVEL',
+            defaultValue: '',
+            description: 'Optional log level: DEBUG, INFO, WARN, ERROR'
+        )
+
+        string(
+            name: 'NODE_NAME',
+            defaultValue: '',
+            description: 'Optional node name'
+        )
+
+        string(
+            name: 'NODE_TYPE',
+            defaultValue: '',
+            description: 'Optional node type'
+        )
+
+        string(
+            name: 'NODE_REGION',
+            defaultValue: '',
+            description: 'Optional AWS region'
+        )
+
+        string(
+            name: 'NODE_AZ',
+            defaultValue: '',
+            description: 'Optional availability zone'
+        )
     }
 
     environment {
@@ -58,7 +103,7 @@ pipeline {
     }
 
     stages {
-        stage('Checkout Fresh Main') {
+        stage('Checkout GitHub Repository') {
             steps {
                 deleteDir()
 
@@ -68,43 +113,60 @@ pipeline {
 
                 sh '''
                     set -eu
-                    echo "===== Checked out revision ====="
+                    echo "===== Current commit ====="
                     git log -1 --oneline
-                    echo "===== Configuration files ====="
-                    find environment node -maxdepth 1 -type f -name '*.json' | sort
+                    echo "===== Repository files ====="
+                    find environment node -maxdepth 1 \
+                        -type f -name '*.json' | sort
                 '''
+            }
+        }
+
+        stage('Display Parameters') {
+            steps {
+                echo "Environment: ${params.ENVIRONMENT}"
+                echo "Configuration type: ${params.CONFIG_TYPE}"
+                echo "Instance type: ${params.INSTANCE_TYPE}"
+                echo "Kubernetes version: ${params.K8S_VERSION}"
+                echo "CPU: ${params.CPU}"
+                echo "Memory: ${params.MEMORY}"
             }
         }
 
         stage('Validate Parameters') {
             steps {
                 script {
-                    if (!(params.ENVIRONMENT in ['dev', 'stage', 'uat', 'prod'])) {
-                        error('Invalid ENVIRONMENT')
+                    if (!(params.ENVIRONMENT in
+                        ['dev', 'stage', 'uat', 'prod'])) {
+                        error('Invalid environment selected')
                     }
 
-                    if (!(params.NODE in ['dev', 'stage', 'uat', 'prod'])) {
-                        error('Invalid NODE')
-                    }
-
-                    if (!(params.CONFIG_TYPE in ['both', 'environment', 'node'])) {
-                        error('Invalid CONFIG_TYPE')
-                    }
-
-                    if (params.CONFIG_TYPE in ['environment', 'both']) {
-                        if (!params.ENV_VERSION?.trim()) {
-                            error('ENV_VERSION is required for environment updates')
-                        }
-
-                        if (params.ENV_REPLICAS?.trim() &&
-                            !(params.ENV_REPLICAS.trim() ==~ /[1-9][0-9]*/)) {
-                            error('ENV_REPLICAS must be a positive integer')
-                        }
+                    if (!(params.CONFIG_TYPE in
+                        ['both', 'environment', 'node'])) {
+                        error('Invalid configuration type')
                     }
 
                     if (params.CONFIG_TYPE in ['node', 'both']) {
                         if (!params.INSTANCE_TYPE?.trim()) {
-                            error('INSTANCE_TYPE is required for node updates')
+                            error(
+                                'INSTANCE_TYPE is required for node updates'
+                            )
+                        }
+                    }
+
+                    if (params.ENV_REPLICAS?.trim()) {
+                        if (!(params.ENV_REPLICAS.trim() ==~
+                            /[1-9][0-9]*/)) {
+                            error(
+                                'ENV_REPLICAS must be a positive integer'
+                            )
+                        }
+                    }
+
+                    if (params.ENV_LOGLEVEL?.trim()) {
+                        if (!(params.ENV_LOGLEVEL.trim() in
+                            ['DEBUG', 'INFO', 'WARN', 'ERROR'])) {
+                            error('Invalid ENV_LOGLEVEL')
                         }
                     }
 
@@ -113,138 +175,226 @@ pipeline {
             }
         }
 
-        stage('Read and Update JSON') {
+        stage('Read Configuration Files') {
             steps {
                 script {
-                    def targets = []
+                    if (params.CONFIG_TYPE in
+                        ['environment', 'both']) {
+                        def envFile =
+                            "environment/${params.ENVIRONMENT}.json"
 
-                    if (params.CONFIG_TYPE in ['environment', 'both']) {
-                        targets.add([
-                            type: 'environment',
-                            path: "environment/${params.ENVIRONMENT}.json"
-                        ])
-                    }
-
-                    if (params.CONFIG_TYPE in ['node', 'both']) {
-                        targets.add([
-                            type: 'node',
-                            path: "node/${params.NODE}.json"
-                        ])
-                    }
-
-                    targets.each { target ->
-                        def path = target.path
-
-                        if (!fileExists(path)) {
-                            error("Missing configuration file: ${path}")
+                        if (!fileExists(envFile)) {
+                            error("Missing file: ${envFile}")
                         }
 
-                        def config = readJSON(
-                            file: path,
+                        def envConfig = readJSON(
+                            file: envFile,
                             returnPojo: true
                         )
 
-                        if (!(config instanceof Map)) {
-                            error("Expected a JSON object in ${path}")
+                        if (!(envConfig instanceof Map)) {
+                            error("Invalid JSON object: ${envFile}")
                         }
 
-                        if (target.type == 'environment') {
-                            def oldVersion = config.version?.toString()
+                        echo "Validated JSON file: ${envFile}"
+                    }
 
-                            if (params.ENV_VERSION.trim() == oldVersion) {
-                                error("New version must differ from current version ${oldVersion}")
-                            }
+                    if (params.CONFIG_TYPE in ['node', 'both']) {
+                        def nodeFile =
+                            "node/${params.ENVIRONMENT}.json"
 
-                            config.version = params.ENV_VERSION.trim()
-
-                            if (params.ENV_APPNAME?.trim()) {
-                                config.appName = params.ENV_APPNAME.trim()
-                            }
-
-                            if (params.ENV_REPLICAS?.trim()) {
-                                config.replicas =
-                                    params.ENV_REPLICAS.trim().toInteger()
-                            }
-
-                            if (params.ENV_LOGLEVEL?.trim()) {
-                                config.logLevel = params.ENV_LOGLEVEL.trim()
-                            }
+                        if (!fileExists(nodeFile)) {
+                            error("Missing file: ${nodeFile}")
                         }
 
-                        if (target.type == 'node') {
-                            config.instanceType = params.INSTANCE_TYPE.trim()
+                        def nodeConfig = readJSON(
+                            file: nodeFile,
+                            returnPojo: true
+                        )
 
-                            if (params.NODE_NAME?.trim()) {
-                                config.nodeName = params.NODE_NAME.trim()
-                            }
-
-                            if (params.NODE_TYPE?.trim()) {
-                                config.nodeType = params.NODE_TYPE.trim()
-                            }
-
-                            if (params.NODE_REGION?.trim()) {
-                                config.region = params.NODE_REGION.trim()
-                            }
-
-                            if (params.NODE_AZ?.trim()) {
-                                config.availabilityZone = params.NODE_AZ.trim()
-                            }
-
-                            if (params.K8S_VERSION?.trim()) {
-                                if (!(config.kubernetes instanceof Map)) {
-                                    config.kubernetes = [:]
-                                }
-                                config.kubernetes.version = params.K8S_VERSION.trim()
-                            }
-
-                            if (params.CPU?.trim() || params.MEMORY?.trim()) {
-                                if (!(config.resources instanceof Map)) {
-                                    config.resources = [:]
-                                }
-
-                                if (params.CPU?.trim()) {
-                                    config.resources.cpu = params.CPU.trim()
-                                }
-
-                                if (params.MEMORY?.trim()) {
-                                    config.resources.memory = params.MEMORY.trim()
-                                }
-                            }
+                        if (!(nodeConfig instanceof Map)) {
+                            error("Invalid JSON object: ${nodeFile}")
                         }
 
-                        writeJSON(file: path, json: config, pretty: 4)
-                        echo "Updated ${path}"
+                        echo "Validated JSON file: ${nodeFile}"
                     }
                 }
             }
         }
 
-        stage('Verify JSON and Review Diff') {
+        stage('Update JSON Configuration') {
             steps {
                 script {
+                    if (params.CONFIG_TYPE in
+                        ['environment', 'both']) {
+                        def envFile =
+                            "environment/${params.ENVIRONMENT}.json"
+
+                        def config = readJSON(
+                            file: envFile,
+                            returnPojo: true
+                        )
+
+                        if (params.ENV_VERSION?.trim()) {
+                            if (params.ENV_VERSION.trim() ==
+                                config.version?.toString()) {
+                                error(
+                                    'New version must differ from current version'
+                                )
+                            }
+
+                            config.version = params.ENV_VERSION.trim()
+                        }
+
+                        if (params.ENV_APPNAME?.trim()) {
+                            config.appName = params.ENV_APPNAME.trim()
+                        }
+
+                        if (params.ENV_REPLICAS?.trim()) {
+                            config.replicas =
+                                params.ENV_REPLICAS.trim().toInteger()
+                        }
+
+                        if (params.ENV_LOGLEVEL?.trim()) {
+                            config.logLevel =
+                                params.ENV_LOGLEVEL.trim()
+                        }
+
+                        writeJSON(
+                            file: envFile,
+                            json: config,
+                            pretty: 4
+                        )
+
+                        echo "Updated local configuration: ${envFile}"
+                    }
+
+                    if (params.CONFIG_TYPE in ['node', 'both']) {
+                        def nodeFile =
+                            "node/${params.ENVIRONMENT}.json"
+
+                        def config = readJSON(
+                            file: nodeFile,
+                            returnPojo: true
+                        )
+
+                        config.instanceType =
+                            params.INSTANCE_TYPE.trim()
+
+                        if (params.NODE_NAME?.trim()) {
+                            config.nodeName = params.NODE_NAME.trim()
+                        }
+
+                        if (params.NODE_TYPE?.trim()) {
+                            config.nodeType = params.NODE_TYPE.trim()
+                        }
+
+                        if (params.NODE_REGION?.trim()) {
+                            config.region = params.NODE_REGION.trim()
+                        }
+
+                        if (params.NODE_AZ?.trim()) {
+                            config.availabilityZone =
+                                params.NODE_AZ.trim()
+                        }
+
+                        if (params.K8S_VERSION?.trim()) {
+                            if (!(config.kubernetes instanceof Map)) {
+                                config.kubernetes = [:]
+                            }
+
+                            config.kubernetes.version =
+                                params.K8S_VERSION.trim()
+                        }
+
+                        if (params.CPU?.trim() ||
+                            params.MEMORY?.trim()) {
+                            if (!(config.resources instanceof Map)) {
+                                config.resources = [:]
+                            }
+
+                            if (params.CPU?.trim()) {
+                                config.resources.cpu =
+                                    params.CPU.trim()
+                            }
+
+                            if (params.MEMORY?.trim()) {
+                                config.resources.memory =
+                                    params.MEMORY.trim()
+                            }
+                        }
+
+                        writeJSON(
+                            file: nodeFile,
+                            json: config,
+                            pretty: 4
+                        )
+
+                        echo "Updated local configuration: ${nodeFile}"
+                    }
+                }
+            }
+        }
+
+        stage('Verify Updated JSON') {
+            steps {
+                script {
+                    sh 'git diff --check'
+
+                    if (params.CONFIG_TYPE in
+                        ['environment', 'both']) {
+                        def envFile =
+                            "environment/${params.ENVIRONMENT}.json"
+
+                        def config = readJSON(
+                            file: envFile,
+                            returnPojo: true
+                        )
+
+                        echo "Verified environment file: ${envFile}"
+                        echo "Application: ${config.appName}"
+                        echo "Version: ${config.version}"
+                        echo "Replicas: ${config.replicas}"
+                    }
+
+                    if (params.CONFIG_TYPE in ['node', 'both']) {
+                        def nodeFile =
+                            "node/${params.ENVIRONMENT}.json"
+
+                        def config = readJSON(
+                            file: nodeFile,
+                            returnPojo: true
+                        )
+
+                        echo "Verified node file: ${nodeFile}"
+                        echo "Instance type: ${config.instanceType}"
+                        echo "Node name: ${config.nodeName}"
+                        echo "Kubernetes: ${config.kubernetes?.version}"
+                        echo "CPU: ${config.resources?.cpu}"
+                        echo "Memory: ${config.resources?.memory}"
+                    }
+
                     sh '''
-                        set -eu
-                        git diff --check
+                        echo "===== Selected configuration diff ====="
                         git diff -- environment node
                     '''
-
-                    echo 'Review the diff in the build log before proceeding.'
                 }
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('SonarQube-Server') {
-                    script {
-                        def scannerHome = tool(
-                            name: 'SonarQube-Scanner',
-                            type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-                        )
+                script {
+                    def scannerHome = tool(
+                        name: 'SonarQube-Scanner',
+                        type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                    )
 
+                    withSonarQubeEnv('SonarQube-Server') {
                         withEnv(["PATH+SONAR=${scannerHome}/bin"]) {
                             sh '''
                                 set -eu
+
                                 sonar-scanner \
                                   -Dsonar.projectKey=flipkart-config-automation \
                                   -Dsonar.projectName=Flipkart-Config-Automation \
@@ -257,9 +407,11 @@ pipeline {
             }
         }
 
-        stage('Maven Compile') {
+        stage('Maven Compilation') {
             when {
-                expression { fileExists('pom.xml') }
+                expression {
+                    fileExists('pom.xml')
+                }
             }
             steps {
                 sh 'mvn -B clean verify'
@@ -271,26 +423,49 @@ pipeline {
                 script {
                     def filesToPackage = []
 
-                    if (params.CONFIG_TYPE in ['environment', 'both']) {
-                        filesToPackage.add("environment/${params.ENVIRONMENT}.json")
+                    if (params.CONFIG_TYPE in
+                        ['environment', 'both']) {
+                        filesToPackage.add(
+                            "environment/${params.ENVIRONMENT}.json"
+                        )
                     }
 
                     if (params.CONFIG_TYPE in ['node', 'both']) {
-                        filesToPackage.add("node/${params.NODE}.json")
+                        filesToPackage.add(
+                            "node/${params.ENVIRONMENT}.json"
+                        )
                     }
 
                     env.ARTIFACT_NAME =
                         "flipkart-config-${env.BUILD_NUMBER}.zip"
 
-                    def fileArgs = filesToPackage.collect {
-                        "'${it}'"
-                    }.join(' ')
+                    env.PACKAGE_FILES = filesToPackage.join(',')
 
-                    sh """
+                    sh '''
                         set -eu
-                        zip '${env.ARTIFACT_NAME}' ${fileArgs}
-                        unzip -l '${env.ARTIFACT_NAME}'
-                    """
+
+                        python3 - <<'PY'
+import os
+import zipfile
+
+artifact = os.environ["ARTIFACT_NAME"]
+files = os.environ["PACKAGE_FILES"].split(",")
+
+with zipfile.ZipFile(
+    artifact, "w", compression=zipfile.ZIP_DEFLATED
+) as archive:
+    for path in files:
+        if not os.path.isfile(path):
+            raise FileNotFoundError(path)
+        archive.write(path)
+
+print("Created artifact:", artifact)
+print("Included files:")
+with zipfile.ZipFile(artifact) as archive:
+    for name in archive.namelist():
+        print(" -", name)
+PY
+                    '''
 
                     archiveArtifacts(
                         artifacts: env.ARTIFACT_NAME,
@@ -300,36 +475,45 @@ pipeline {
             }
         }
 
-        stage('Create Feature Branch and Commit') {
+        stage('Create Git Feature Branch') {
             steps {
                 script {
                     env.FEATURE_BRANCH =
-                        "feature/config-${params.ENVIRONMENT}-${params.NODE}-${env.BUILD_NUMBER}"
+                        "feature/update-${params.ENVIRONMENT}-${env.BUILD_NUMBER}"
 
                     sh '''
                         set -eu
+
                         git config user.name "Asif Shaik"
                         git config user.email "asifshaik6558@gmail.com"
 
                         git switch -c "$FEATURE_BRANCH"
 
                         if [ "$CONFIG_TYPE" = "environment" ]; then
-                            git add -- "environment/$ENVIRONMENT.json"
+                            git add -- \
+                                "environment/$ENVIRONMENT.json"
                         elif [ "$CONFIG_TYPE" = "node" ]; then
-                            git add -- "node/$NODE.json"
+                            git add -- \
+                                "node/$ENVIRONMENT.json"
                         else
-                            git add -- "environment/$ENVIRONMENT.json" "node/$NODE.json"
+                            git add -- \
+                                "environment/$ENVIRONMENT.json" \
+                                "node/$ENVIRONMENT.json"
                         fi
 
                         if git diff --cached --quiet; then
-                            echo "No configuration changes to commit"
+                            echo "No configuration changes to commit."
                             exit 1
                         fi
 
                         git diff --cached --check
                         git diff --cached --stat
-                        git commit -m "Update configuration for $ENVIRONMENT"
+
+                        git commit \
+                            -m "Update $ENVIRONMENT configuration"
                     '''
+
+                    echo "Prepared branch: ${env.FEATURE_BRANCH}"
                 }
             }
         }
@@ -350,7 +534,7 @@ pipeline {
             }
         }
 
-        stage('Create or Reuse Pull Request') {
+        stage('Create GitHub Pull Request') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -361,6 +545,7 @@ pipeline {
                 ]) {
                     sh '''
                         set +x
+
                         python3 - <<'PY'
 import json
 import os
@@ -371,6 +556,7 @@ repo = os.environ["GITHUB_REPO"]
 branch = os.environ["FEATURE_BRANCH"]
 base = os.environ["BASE_BRANCH"]
 token = os.environ["GITHUB_TOKEN"]
+owner = repo.split("/")[0]
 
 headers = {
     "Authorization": f"Bearer {token}",
@@ -380,18 +566,20 @@ headers = {
 
 query = urllib.parse.urlencode({
     "state": "open",
-    "head": f"{repo.split('/')[0]}:{branch}",
+    "head": f"{owner}:{branch}",
     "base": base
 })
 
-url = f"https://api.github.com/repos/{repo}/pulls?{query}"
-request = urllib.request.Request(url, headers=headers)
+request = urllib.request.Request(
+    f"https://api.github.com/repos/{repo}/pulls?{query}",
+    headers=headers
+)
 
 with urllib.request.urlopen(request, timeout=30) as response:
     pulls = json.load(response)
 
 if pulls:
-    print("Reusing open pull request:", pulls[0]["html_url"])
+    print("Existing pull request:", pulls[0]["html_url"])
 else:
     payload = {
         "title": f"Configuration update: {branch}",
@@ -402,8 +590,11 @@ else:
 
     request = urllib.request.Request(
         f"https://api.github.com/repos/{repo}/pulls",
-        data=json.dumps(payload).encode(),
-        headers={**headers, "Content-Type": "application/json"},
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            **headers,
+            "Content-Type": "application/json"
+        },
         method="POST"
     )
 
@@ -423,11 +614,11 @@ PY
         }
 
         failure {
-            echo 'Pipeline failed. Check the failed stage and console output.'
+            echo 'Pipeline failed. Check the failed stage in Console Output.'
         }
 
         always {
-            echo "Build result: ${currentBuild.currentResult}"
+            echo "Final build result: ${currentBuild.currentResult}"
         }
     }
 }
